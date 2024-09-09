@@ -1,0 +1,60 @@
+---
+title: "Introduction"
+author: "Ivan Derkachev"
+date: "2024-09-09"
+output: 
+  html_notebook:
+  toc: yes
+toc_title: "Оглавление"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+library(tidyverse)
+library(readxl)
+library(openxlsx)
+library(psych)
+library(flextable)
+
+```
+
+## Чтение данных (пакеты readr, readxl)
+
+Основные функции
+
+```{r}
+# data_tsv, data_csv, data_csv2, data_excel, data_rds
+```
+
+## Запись файлов (пакеты readr, readxl)
+
+Основные функции
+
+```{r}
+# write_delim, write_csv, write_excel_csv, write_csv2, write_excel_csv2, 
+#write.xlsx(data_excel, "data/docs/data_excel.xlsx", sheetName = "data", 
+#           colNames = TRUE, rowNames = TRUE, append = FALSE)
+#write_rds
+```
+
+Аргументы col.names и row.names говорят, нужно ли записывать в файл имена столбцов и имена строк соответственно. Аргумент append нужен для того, чтобы добавлять новые листы к уже существующей книге
+
+Основной формат данных в R - .rds. Особенность - он сериализует файл.  
+
+## tibble вместо data.frame
+
+%>% - Ctrl + Shift + M
+
+Особенности tibble:
+
+1) tibble не изменяют тип ввода. Если вы вводили переменные типа character, то такими они и будут. Если numeric, то будут numeric. В том числе это позволяет даже вводить в качестве значений ячеек списки!
+2) tibble не меняет имена переменных: если вы ввели имя с пробелом, то он не будет заполнен точкой или иным знаком, однако, нужно оборачивать имена в апострофы (чаще всего находится на клавише буквы "ё" в верхнем левом углу клавиатуры). Это следует делать всякий раз, когда имя переменной отличается от простой строки на латинице без иных знаков. Например: 3) columnname не требует апострофов, а `column name` уже требует;
+4) Оценивает аргументы **лениво и последовательно**, что мы разберём в следующем шаге;
+5) Не использует имена строк;
+6) При выводе таблицы данных в печать автоматически будут показаны только первые 10 строк и все столбцы, которые     поместятся на экран.
+
+```{r}
+tibble(var_1 <- 1:10, var_2 <- var_1 ** 2)
+```
+
