@@ -1,0 +1,82 @@
+---
+title: "Estimation of probability and standart error"
+author: "Ivan Derkachev"
+date: "2024-10-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+```
+
+
+## Параметры эксперимента
+```{r}
+true_probs <- seq(0.1, 0.9, by = 0.1)  # Диапазон истинных вероятностей
+n_simulations <- 1000  # Количество виртуальных экспериментов
+n_patients <- seq(10, 1000, 10)  # Различные размеры выборки
+```
+
+## Функция для проведения эксперимента
+```{r}
+run_experiment <- function(sample_size, true_prob) {
+  samples <- rbinom(n = sample_size * n_simulations, size = 1, prob = true_prob)
+  sample_matrix <- matrix(samples, nrow = n_simulations, ncol = sample_size) # Каждая строка — это один эксперимент
+  empirical_probs <- rowMeans(sample_matrix) # Вероятность события для каждого эксперимента
+  return(empirical_probs)
+}
+```
+
+## Эксперименты разных комбинаций размера выборок и истинных вероятностей
+```{r}
+results <- expand.grid(sample_size = n_patients, true_prob = true_probs) %>%
+  rowwise() %>%
+  mutate(empirical_probs = list(run_experiment(sample_size, true_prob)),
+         error = list(abs(empirical_probs - true_prob))) %>%
+  unnest(c(empirical_probs, error)) %>%
+  group_by(sample_size, true_prob) %>%
+  summarise(mean_error = mean(error), .groups = 'drop')
+
+```
+
+
+## График зависимости ошибки от объема выборки и истинной вероятности
+```{r}
+ggplot(results, aes(x = sample_size, y = mean_error, color = as.factor(true_prob))) +
+  geom_line() +
+  labs(title = "Зависимость ошибки от объема выборки и истинной вероятности",
+       x = "Размер выборки",
+       y = "Средняя ошибка",
+       color = "Истинная вероятность") +
+  theme_minimal()
+```
+
+SE больше всего при истинной вероятнсти = 0.5, независимо от размера выборки.
+
+SE обратно пропорциональна корню квадратному из размера выборки: 
+SE = sqrt((ист.вероятность * (1 - ист.вероятность)) / размер выборки)
+
+Для сравнения график по этой формуле:
+
+```{r}
+true_probs <- seq(0.1, 0.9, by = 0.1)  # Диапазон истинных вероятностей
+n_patients <- seq(10, 1000, 10)  # Различные размеры выборки
+
+# Вычисление стандартной ошибки
+results <- expand.grid(sample_size = n_patients, true_prob = true_probs) %>%
+  mutate(standard_error = sqrt((true_prob * (1 - true_prob)) / sample_size))
+
+# Построение графика стандартной ошибки как функции от объема выборки
+ggplot(results, aes(x = sample_size, y = standard_error, color = as.factor(true_prob))) +
+  geom_line() +
+  labs(title = "Зависимость стандартной ошибки от размера выборки",
+       x = "Размер выборки",
+       y = "Стандартная ошибка",
+       color = "Истинная вероятность") +
+  theme_minimal()
+```
+
