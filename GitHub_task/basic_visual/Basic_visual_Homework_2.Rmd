@@ -1,0 +1,497 @@
+---
+title: "Basic_visual_Homework_2"
+author: "Ivan Derkachev"
+date: "2024-10-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+
+library(tidyverse)
+library(reshape2)
+library(gridExtra)
+```
+
+## Загрузка данных
+
+```{r}
+data <- read_csv("hogwarts_2024.csv")
+```
+
+```{r}
+data <- data |> mutate(
+  across(c(house, course, sex, wandCore, bloodStatus), ~ as.factor(.x)))
+```
+
+## Диаграммы рассеяния (скаттерплоты)
+
+### 1 задание
+
+Постройте скаттерплот, визуализирующий связь между суммарным
+баллом студента за год и оценкой за экзамен по травологии. Добавьте на
+график линию тренда. Удалите доверительную область и сделайте линию
+прямой. Подумайте, как избежать того, чтобы записать одни и те же
+координаты x и y дважды. Проинтерпретируйте график. (1 б.)
+
+```{r, fig.width=12, fig.height=8}
+ggplot(data, aes(x = `Herbology exam`, y = result)) +
+  geom_point(position = position_jitter(width = 0.1, height = 0.1)) +
+  geom_smooth(method = "lm", se = FALSE) +
+  theme_minimal() +
+  geom_jitter(width = 0.1, height = 0.1) +
+  labs(x = "Оценка за экзамен по травологии",
+       y = "Суммарный балл за год",
+       title = "Связь между суммарным баллом и оценкой за экзамен") +
+  theme(text = element_text(size = 18),
+        plot.title = element_text(size = 20, hjust = 0.5))
+```
+
+**На графике видно положительную взаимосвзяь между итоговым баллом и оценкой.**
+
+### 2 задание
+
+Отобразите на одной иллюстрации скаттерплоты, аналогичные тому, что
+вы делали на первом задании, для экзаменов по травологии,
+магловедению, прорицаниям и зельеварению. На иллюстрации также
+должна присутствовать линия тренда с характеристиками, аналогичными
+тем, что были в пункте 1. Раскрасьте точки в разные цвета, в соответствии с
+факультетами. Используйте стандартные цвета факультетов (как в
+лекционных rmd). Проинтерпретируйте полученный результат. (1 б). Если
+вы создадите иллюстрацию из этого пункта, используя только пакеты
+семейства tidyverse, и не привлекая дополнительные средства, вы
+получите дополнительные 0.5 б.
+
+```{r, fig.width=12, fig.height=8}
+data %>% 
+  pivot_longer(cols = c(`Herbology exam`, `Muggle studies exam`, `Divinations exam`,`Potions exam`),
+               names_to = "Exam", values_to = "Mark") %>% 
+  ggplot(aes(x = Mark, y = result)) +
+  geom_point(aes(color = house),
+             position = position_jitter(width = 0.1, height = 0.1)) +
+  geom_smooth(method = "lm", se = FALSE) +
+  scale_color_manual(values = c("Gryffindor" = "#C50000", 
+                                "Hufflepuff" = "#ECB939", 
+                                "Ravenclaw" = "#41A6D9", 
+                                "Slytherin" = "#1F5D25")) +
+  theme(text = element_text(size = 18),
+        plot.title = element_text(size = 20, hjust = 0.5)) +
+  facet_wrap(~ Exam)
+```
+**На графике видно положительную взаимосвзяь между итоговым баллом и оценкой по травологии, магловедению и прорицаниям. Итоговый балл имеет отрицательную взаимосвязь с оценкой по зельеварению.**
+
+### 3 задание
+
+Видоизмените график, полученный на предыдущем шаге. Сгруппируйте и
+покрасьте линии тренда в соответствии с одной из категориальных
+переменных (с такой, которая подсвечивает одно из наблюдений на
+предыдущем этапе, относящееся ко всем 4-м экзаменам). Постарайтесь
+избежать коллизий в легенде, при этом сохранив и цветовую палитру для
+раскраски точек по факультетам. (1 б.)
+
+```{r, fig.width=12, fig.height=8}
+data %>% 
+  pivot_longer(cols = c(`Herbology exam`, `Muggle studies exam`, `Divinations exam`,`Potions exam`),
+               names_to = "Exam", values_to = "Mark") %>% 
+  ggplot(aes(x = Mark, y = result)) +
+  geom_point(aes(colour = house),
+             position = position_jitter(width = 0.1, height = 0.1)) +
+  geom_smooth(aes(color = sex),
+              method = "lm", se = FALSE) +
+  scale_color_manual(name = "Факультет/\nПол",
+                     values = c("Gryffindor" = "#C50000", 
+                                "Hufflepuff" = "#ECB939", 
+                                "Ravenclaw" = "#41A6D9", 
+                                "Slytherin" = "#1F5D25",
+                                "male" = "black",
+                                "female" = "red"),
+                     labels = c("Gryffindor" = "Гриффиндор", 
+                                "Hufflepuff" = "Пуффендуй", 
+                                "Ravenclaw" = "Когтевран", 
+                                "Slytherin" = "Слизерин", 
+                                "male" = "Мужчины", 
+                                "female" = "Женщины"))  +
+  labs(title = "График результатов по экзаменам",
+       x = "Оценка за экзамен",
+       y = "Суммарный балл за год")  +
+  theme(text = element_text(size = 18),
+        plot.title = element_text(size = 20, hjust = 0.5)) +
+  facet_wrap(~ Exam, 
+             labeller = labeller(Exam = c(`Herbology exam` = "Экзамен по травологии", 
+                                          `Muggle studies exam` = "Экзамен по магловедению", 
+                                          `Divinations exam`= "Экзамен по прорицаниям",
+                                          `Potions exam`= "Экзамен по зельеварению"))) +
+  guides(color = guide_legend(override.aes = list(size = 4)))
+```
+
+## geom_col и вещи вокруг него
+
+### 1 задание
+
+Постройте барплот (столбиковую диаграмму) распределения набранных
+баллов за первый семестр (с 1-й по 17-ю неделю включительно) у
+студентов разного происхождения. Если у вас возникают трудности,
+
+можете обратиться к шпаргалке по dplyr от posit. Выдвиньте гипотезу (или
+гипотезы), почему распределение получилось именно таким. (1 б.)
+
+```{r}
+data %>% 
+  mutate(semestr_score = rowSums(select(., matches("^week_([1-9]|1[0-7])$")), , na.rm = TRUE)) %>% 
+  ggplot(aes(x = bloodStatus, y = semestr_score)) +
+  stat_summary(fun = sum, geom = "bar", fill = "lightblue") +
+  labs(title = "Распределение баллов за семестр",
+       x = "Происхождение", 
+       y = "Суммарный балл за семестр") +
+  theme_minimal() +
+  theme(text = element_text(size = 20),
+        plot.title = element_text(hjust = 0.5)) +
+  scale_x_discrete(labels = c("muggle-born" = "Маглы", 
+                              "half-blood" = "Полукровки", 
+                              "pure-blood" = "Чистокровные"))
+```
+
+**На распределение баллов может влиять разное количество студентов по происхождению.
+Чтобы проверить построим гистограмму для визуализации количества студентов по происхождению.**
+
+```{r}
+ggplot(data, aes(x = bloodStatus)) +
+  geom_bar(fill = "lightblue") +
+  labs(title = "Число студентов по происхождению",
+       x = "Происхождение", y = "Количество студентов") +
+  theme_minimal() +
+  theme(text = element_text(size = 20),
+        plot.title = element_text(hjust = 0.5)) + 
+  scale_x_discrete(labels = c("muggle-born" = "Маглы", 
+                              "half-blood" = "Полукровки", 
+                              "pure-blood" = "Чистокровные"))
+```
+
+**Действительно, имеется большое различие числа студентов.Полукровок почти 400!**
+**Можно посмотерть средние значения, чтобы увидеть более адекватный показатель.**
+
+```{r, fig.width=8, fig.height=5}
+data %>% 
+  mutate(semestr_score = rowSums(select(., matches("^week_([1-9]|1[0-7])$")), , na.rm = TRUE)) %>% 
+  ggplot(aes(x = bloodStatus, y = semestr_score)) +
+  stat_summary(fun = mean, geom = "bar", fill = "lightblue") +
+  labs(title = "Средний балл за семестр по происхождению",
+       x = "Происхождение", 
+       y = "Средний балл за семестр") +
+  theme_minimal() +
+  theme(text = element_text(size = 20),
+        plot.title = element_text(hjust = 0.5)) +
+  scale_x_discrete(labels = c("muggle-born" = "Маглы", 
+                              "half-blood" = "Полукровки", 
+                              "pure-blood" = "Чистокровные"))
+
+```
+
+### Задание 2
+
+Модифицируйте предыдущий график – отсортируйте столбцы в порядке
+убывания суммы баллов. Добавьте на график текстовые метки,
+отражающие число студентов каждого происхождения. Попробуйте
+использовать для этой задачи не geom_text, а geom_label. Настройте
+внешний вид geom_label по своему усмотрению. Поправьте название оси.
+Проинтерпретируйте график. Соотносится ли интерпретация с вашей
+гипотезой из пункта 1? (1 б.)
+
+```{r, fig.width=10, fig.height=8}
+data %>% 
+  mutate(semestr_score = rowSums(select(., matches("^week_([1-9]|1[0-7])$")), na.rm = TRUE)) %>%
+  group_by(bloodStatus) %>% 
+  summarise(total_score = sum(semestr_score, na.rm = TRUE),
+            student_count = n()) %>% 
+  arrange(desc(total_score)) %>% 
+  ggplot(aes(x = reorder(bloodStatus, -total_score), y = total_score)) +
+  geom_bar(stat = "identity", fill = "skyblue") +
+  geom_label(aes(label = student_count),
+             color = "black",
+             fill = "lightgreen",
+             size = 4,
+             vjust = -0.5) +
+  labs(title = "Распределение баллов за семестр",
+       x = "Происхождение", 
+       y = "Суммарный балл за семестр") +
+  theme_minimal() +
+  theme(text = element_text(size = 20),
+        plot.title = element_text(hjust = 0.5)) +
+  scale_x_discrete(labels = c("muggle-born" = "Маглы", 
+                              "half-blood" = "Полукровки", 
+                              "pure-blood" = "Чистокровные"))
+
+```
+
+**Результат соотносится с гипотезой.**
+
+### 3 задание
+
+И снова измените график – добавьте на него разбивку не только по
+происхождению, но и по полу. Раскрасьте столбцы по происхождению.
+Сделайте подписи к столбцам читаемыми. Дайте графику название,
+измените, если требуется, название осей. Сделайте шаг для оси, на
+которой отображены очки, через каждую тысячу баллов. Разместите
+текстовые метки по правому краю графика. Настройте график таким
+образом, чтобы метки были видны целиком и не обрезались. Сохраните
+график на устройство.(1.5 б.)
+
+```{r, fig.width=12, fig.height=6}
+processed_data <- data %>% 
+  mutate(semestr_score = rowSums(select(., matches("^week_([1-9]|1[0-7])$")), na.rm = TRUE)) %>%
+  group_by(bloodStatus, sex) %>%
+  summarise(total_score = sum(semestr_score, na.rm = TRUE),
+            student_count = n(), .groups = 'drop') %>% 
+  arrange(desc(total_score)) 
+
+
+processed_data %>%
+  ggplot(aes(x = interaction(bloodStatus, sex), y = total_score, fill = bloodStatus)) +
+  geom_bar(stat = "identity", position = position_stack()) +
+  geom_label(aes(label = student_count),
+             position = position_nudge(x = 0.4),
+             color = "black",
+             fill = "lightgreen",
+             size = 4,
+             hjust = 1,
+             vjust = -0.5) +
+  labs(title = "Распределение баллов за семестр по происхождению и полу",
+       x = "Пол", 
+       y = "Суммарный балл за семестр") +
+  scale_y_continuous(breaks = seq(0, max(processed_data$total_score, na.rm = TRUE), by = 1000)) + 
+  theme_minimal() +
+  theme(text = element_text(size = 20),
+        plot.title = element_text(hjust = 0.5)) + 
+  scale_fill_manual(name = "Происхождение",
+                    values = c("muggle-born" = "lightblue", 
+                               "half-blood" = "lightcoral", 
+                               "pure-blood" = "lightgreen"),
+                    labels = c("muggle-born" = "Маглы", 
+                               "half-blood" = "Полукровки", 
+                               "pure-blood" = "Чистокровки")) + 
+  scale_x_discrete(labels = c("muggle-born.female" = "Женщины", 
+                              "half-blood.female" = "", 
+                              "pure-blood.female" = "",
+                              "muggle-born.male" = "Мужчины", 
+                              "half-blood.male" = "", 
+                              "pure-blood.male" = "")) + 
+  geom_vline(xintercept = 3.5, size = 1) +
+  coord_cartesian(clip = "off")
+```
+
+### Здадание 4
+
+Функция coord_flip() используется для транспонирования, что позволяет отображать данные в горизонтальном виде. Это может быть особенно полезно когда метки на оси x длинные, их проще читать в горизонтальном формате и можно избежать наложений текста.
+
+Иногда изменение ориентации может затруднить интерпретацию данных, особенно если зрители привыкли к стандартной вертикальной ориентации. Также горизонтальные графики могут занять больше места по вертикали, что может стать проблемой при ограниченном пространстве на странице.
+
+
+## Разное
+
+### 1 задание
+
+Сравните распределение баллов за экзамен по зельеварению и за
+экзамен по древним рунам. Сделайте это тремя разными способами. Под
+разными способами понимаются идеологически разные геомы или
+способы группировки. Не считаются разными способами изменения
+константных визуальных параметров (цвет заливки, размер фигур) на
+сходных в остальном графиках. Объедините графики, таким образом,
+чтобы результирующий график имел два столбца и 2 строки. Два графика
+должны находиться в верхней строке и занимать равную площадь. Третий
+график должен занимать нижнюю строку целиком. (2 б).
+
+```{r, fig.width=12, fig.height=8}
+histogram_plot <-
+  ggplot(data) +
+  geom_histogram(aes(x = `Potions exam`, fill = "Зельеварение"),
+                 alpha = 0.5,
+                 position = "identity") +
+  geom_histogram(aes(x = `Study of ancient runes exam`, fill = "Древние руны"),
+                 alpha = 0.5,
+                 position = "identity") +
+    labs(title = "Гистограммы оценок по зельеварению и древние рунам",
+         x = "Оценка",
+         y = "Частота") +
+    theme_minimal() +
+    theme(text = element_text(size = 20),
+          plot.title = element_text(hjust = 0.5)) +
+    scale_fill_manual(name = "Экзамен",
+                      values = c("blue","green"))
+
+
+line_plot <- data %>% 
+  melt(data, id.vars = "id", 
+       measure.vars = c("Potions exam", "Study of ancient runes exam"),
+       variable.name = "Exam", value.name = "Score") %>% 
+  mutate(Exam = recode(Exam, 
+                       `Potions exam` = "Зельеварение", 
+                       `Study of ancient runes exam` = "Древние руны")) %>% 
+  ggplot(aes(x = Exam, y = Score, group = id)) +
+  geom_line(aes(color = as.factor(id)), alpha = 0.6) +
+  labs(title = "Сравнение оценок", 
+       x = "Экзамен", y = "Оценка") +
+  theme_minimal() +
+  theme(text = element_text(size = 20),
+        plot.title = element_text(hjust = 0.5),
+        legend.position = "none")
+
+
+
+box_plot <- data %>%
+  melt(measure.vars = c("Potions exam", "Study of ancient runes exam"),
+       variable.name = "Exam", value.name = "Score") %>%
+  mutate(Exam = recode(Exam,
+                       `Potions exam` = "Зельеварение",
+                       `Study of ancient runes exam` = "Древние руны")) %>% 
+  ggplot(aes(x = Exam, y = Score, fill = Exam)) +
+  geom_boxplot() +
+  labs(title = "Боксплоты оценок", x = "Экзамен", y = "Оценка") +
+  scale_fill_manual(values = c("Зельеварение" = "skyblue", "Древние руны" = "lightgreen")) +
+  theme(legend.position = "none",
+        text = element_text(size = 20),
+        plot.title = element_text(hjust = 0.5))
+
+grid.arrange(box_plot, line_plot, histogram_plot, ncol = 2, nrow = 2, layout_matrix = rbind(c(1, 2), c(3, 3)))
+
+```
+
+### 2 задание
+
+Визуализируйте средний балл по зельеварению студентов с различным
+происхождением. Вы вольны добавить дополнительные детали и
+информацию на график. Проинтерпретируйте результат. Как вы думаете,
+почему он именно такой? Если у вас есть гипотеза, проиллюстрируйте ее
+еще одним графиком (или графиками). Объедините их при помощи
+ggarrange. (по 1 б. за первый и график и правильную интерпретацию с
+подтверждением в виде второго графика и текстовой аргументации).
+Измените порядок ваших фигур на первом графике слева направо
+следующим образом: маглорожденные,, чистокровные, полукровки.
+
+Скорректируйте название оси. Если у вас возникают сложности,
+обратитесь к шпаргалке по пакету forcats от posit. (Дополнительные 0.5 б.)
+
+
+#### 1 график
+
+```{r, fig.width=16, fig.height=10}
+
+summary_data <- data %>%
+  mutate(bloodStatus = recode(bloodStatus, 
+                              "muggle-born" = "Маглорожденные", 
+                              "pure-blood" = "Чистокровные", 
+                              "half-blood" = "Полукровки")) %>%
+  mutate(bloodStatus = fct_relevel(bloodStatus, 
+                                   "Маглорожденные", 
+                                   "Чистокровные", 
+                                   "Полукровки")) %>%
+  group_by(bloodStatus) %>%
+  summarise(mean_value = mean(`Potions exam`, na.rm = TRUE),
+            sd_value = sd(`Potions exam`, na.rm = TRUE))
+
+data %>%
+  mutate(bloodStatus = recode(bloodStatus, 
+                              "muggle-born" = "Маглорожденные", 
+                              "pure-blood" = "Чистокровные", 
+                              "half-blood" = "Полукровки")) %>%
+  mutate(bloodStatus = fct_relevel(bloodStatus, 
+                                   "Маглорожденные", 
+                                   "Чистокровные", 
+                                   "Полукровки")) %>%
+  ggplot(aes(x = bloodStatus, y = `Potions exam`)) +
+  stat_summary(fun = mean, geom = "crossbar", color = "red", size = 0.5) +
+  stat_summary(fun.data = mean_sdl, geom = "errorbar", width = 0.2) +
+  geom_jitter() +
+  geom_text(data = summary_data, 
+            aes(x = bloodStatus, 
+                y = mean_value, 
+                label = paste0(round(mean_value, 1), " ± ", round(sd_value, 1))), 
+            vjust = -1, color = "red", size = 5, 
+            position = position_nudge(x = 0.5)) +
+  labs(x = "Происхождение", y = "Средний балл по зельеварению", title = "Средний балл по зельеварению по происхождению (M ± SD)") +
+  theme_minimal() +
+  theme(text = element_text(size = 25),
+        plot.title = element_text(hjust = 0.5))
+
+```
+
+
+**Средний балл по зельеварению немного ниже у маглорожденных.**
+
+
+#### 2 график
+```{r, fig.width=10, fig.height=6}
+
+data %>% 
+  ggplot(aes(x = bloodStatus, y = result)) +
+  stat_summary(fun = mean, geom = "crossbar", color = "red") +
+  stat_summary(fun.data = mean_sdl, geom = "errorbar", width = 0.2, color = "red") +
+  geom_jitter() +
+  labs(title = "Средний балл за семестр по происхождению",
+       x = "Происхождение", 
+       y = "Средний балл за семестр") +
+  theme_minimal() +
+  theme(text = element_text(size = 18),
+        plot.title = element_text(hjust = 0.5)) +
+  scale_x_discrete(labels = c("muggle-born" = "Маглы", 
+                              "half-blood" = "Полукровки", 
+                              "pure-blood" = "Чистокровные"))
+```
+
+**При этом, средний балл по всем эказменам у маглов не ниже, чем у остальных.**
+**Возможно, низкий балл по зельеварению связан с тем, что препод по зельеварению хуже относится к маглам.** 
+
+
+
+## Воспроизведение графика
+
+```{r, fig.width=12, fig.height=8}
+mean_values <- data %>% # средние значения по факультетам независимо от пола (ромбики)
+  mutate(house = recode(house,
+                        `Gryffindor` = "Гриффиндор",
+                        `Hufflepuff` = "Пуффендуй",
+                        `Ravenclaw` = "Равенкло",
+                        `Slytherin` = "Слизерин")) %>%
+  group_by(house) %>%
+  summarise(mean_result = mean(result, na.rm = TRUE))
+
+data %>%
+  mutate(house = recode(house,
+                        `Gryffindor` = "Гриффиндор",
+                        `Hufflepuff` = "Пуффендуй",
+                        `Ravenclaw` = "Равенкло",
+                        `Slytherin` = "Слизерин"),
+         sex = recode(sex,
+                      `female` = "Девочки",
+                      `male` = "Мальчики")) %>% 
+  ggplot(aes(x = house, y = result, fill = house)) +
+  geom_violin(trim = TRUE, alpha = 0.9) +
+  geom_boxplot(width = 0.1, fill = "white", outlier.shape = NA) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red", size = 1) +
+  geom_point(data = mean_values, aes(x = house, y = mean_result), 
+             color = "black", shape = 23, fill = "#800", size = 6) +  # Средние значения по факультетам
+  scale_fill_manual(values = c("Гриффиндор" = "#C50000", 
+                               "Пуффендуй" = "#ECB939", 
+                               "Равенкло" = "#41A6D9", 
+                               "Слизерин" = "#1F5D25")) +
+  scale_y_continuous(breaks = seq(-300, 250, by = 50)) +
+  labs(
+    title = "Баллы студентов Хогвартса",
+    subtitle = "Распределение числа баллов у студентов различных факультетов Хогвартса в 2023-2024 учебном году",
+    x = NULL, y = "Количество очков",
+    fill = "Факультет"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_blank(),
+        panel.grid = element_blank(),
+        axis.text.y = element_text(size = 14, color = "black"),
+        plot.title = element_text(size = 18, hjust = 0.5),
+        plot.subtitle = element_text(size = 14, hjust = 0.5, color = "#A00000"),
+        legend.title = element_text(size = 14),
+        legend.text = element_text(size = 12, face = "italic"),
+        panel.grid.major.x = element_blank(),
+        strip.background = element_rect(fill = "#D3D3D3", color = "NA"),
+        strip.text = element_text(size = 14),
+        legend.position = c(0.5, 0.1)) +
+  facet_grid(. ~ sex)
+```
+
