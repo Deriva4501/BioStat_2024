@@ -1,0 +1,8 @@
+"0","# Объединение обработанных наборов данных"
+"0","ADMH <- ADSL_processed %>%"
+"0","  left_join(MH_processed, by = c(""STUDYID"", ""SUBJID"")) %>%"
+"0","  left_join(dates_processed, by = c(""STUDYID"", ""SUBJID"", ""MHSEQ"")) %>%"
+"0","  select(STUDYID, USUBJID, TRTP, TRTPN, MHSEQ, MHCAT, MHTERM, MHDECOD, MHBODSYS,"
+"0","         MHSTDTC, ASTDT, ASTDTF, MHENDTC, AENDT, AENDTF, MHENRTPT, MHENRF) %>%"
+"0","  filter(!is.na(MHTERM))"
+"0",""

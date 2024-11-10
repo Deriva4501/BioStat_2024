@@ -1,0 +1,4 @@
+"0","ADSL_processed <- ADSL_data %>%"
+"0","  select(STUDYID, SUBJID, USUBJID, TRTP, TRTPN) %>%"
+"0","  mutate(across(c(STUDYID, USUBJID, TRTP), as.character),"
+"0","         TRTPN = as.numeric(TRTPN))"
