@@ -1,0 +1,861 @@
+---
+title: "Advanced_visualization"
+author: "Ivan Derkachev"
+date: "2024-11-16"
+output:
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true  
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, error = FALSE, warning = FALSE)
+
+library(tidyverse)
+library(readr)
+library(car)
+library(rstatix)
+library(ggpubr)
+library(GGally)
+library(pheatmap)
+library(cluster)
+library(factoextra) 
+library(plotly)
+library(umap)
+
+```
+
+
+## 1 задание
+
+Загрузите датасет very_low_birthweight.RDS (лежит в папке домашнего задания). 
+Это данные о 671 младенце с очень низкой массой тела (<1600 грамм), собранные в Duke University Medical Center доктором Майклом О’Ши c 1981 по 1987 г.  Описание переменных см. здесь. Переменными исхода являются колонки 'dead', а также время от рождения до смерти или выписки (выводятся из 'birth' и 'exit'. 7 пациентов были выписаны до рождения). 
+Сделайте копию датасета, в которой удалите колонки с количеством пропусков больше 100, а затем удалите все строки с пропусками. 
+
+
+```{r}
+data <- read_rds("very_low_birthweight.rds")
+#glimpse(data)
+
+data_processed <- data %>% 
+  select(where(~ sum(is.na(.)) <= 100)) %>% 
+  drop_na()
+
+```
+
+
+## 2 задание
+
+Постройте графики плотности распределения для числовых переменных. Удалите выбросы, если таковые имеются. Преобразуйте категориальные переменные в факторы. Для любых двух числовых переменных раскрасьте график по переменной ‘inout’.
+
+
+```{r}
+
+data_processed <- data_processed %>% 
+  mutate(across(c(twn, vent, pneumo, pda, cld, dead), as.factor))
+
+data_processed %>% 
+  select_if(is.numeric) %>% 
+  pivot_longer(cols = everything(), names_to = "variable", values_to = "value") %>% 
+  ggplot() +
+  geom_density(aes(x = value)) +
+  facet_wrap(~ variable, scales = "free") +
+  theme_minimal()
+
+
+```
+
+
+
+```{r}
+# Идентификация выбросов
+outliers <- boxplot.stats(data_processed$hospstay)$out
+
+# Удаление выбросов
+cleaned_data <- data_processed %>%
+  filter(!hospstay %in% outliers) %>% 
+  filter(hospstay > 0)
+
+cleaned_data %>% 
+  select_if(is.numeric) %>% 
+  pivot_longer(cols = everything(), names_to = "variable", values_to = "value") %>% 
+  ggplot() +
+  geom_density(aes(x = value)) +
+  theme_minimal() +
+  facet_wrap(~ variable, scales = "free")
+
+cleaned_data %>%
+  select(apg1, birth, inout) %>%
+  pivot_longer(cols = c(apg1, birth), names_to = "variable", values_to = "value") %>%
+  ggplot() + 
+  geom_density(aes(x = value, color = inout)) +
+  theme_minimal() +
+  facet_wrap(~ variable, scales = "free") +
+  scale_color_manual(values = c("born at Duke" = "orange",
+                                "transported" = "steelblue"))
+
+```
+
+
+## 3 задание
+
+Проведите тест на сравнение значений колонки ‘lowph’ между группами в переменной inout. Вид статистического теста определите самостоятельно. Визуализируйте результат через библиотеку 'rstatix'. Как бы вы интерпретировали результат, если бы знали, что более низкое значение lowph ассоциировано с более низкой выживаемостью?
+
+
+```{r}
+ggplot(cleaned_data, aes(sample = lowph)) +
+  geom_qq() +
+  geom_qq_line(size = 1) +
+  facet_wrap(~ inout) +
+  labs(title = "QQ-plots",
+       x = "Theoretical quantile",
+       y = "Empirical quantile") +
+  theme_minimal() +
+  theme(strip.text = element_text(size = 14))
+
+leveneTest(lowph ~ inout, cleaned_data)
+
+t_test_result <- cleaned_data %>%
+  t_test(lowph ~ inout) %>%
+  add_y_position()  # Добавим y-позиции
+
+cleaned_data %>%
+  ggboxplot(x = "inout", y = "lowph", add = "jitter") +
+  stat_pvalue_manual(t_test_result, label = "p = {p}") # Визуализация с p-valiue
+
+```
+
+**Значения lowph значимо различаются между группами. Это может свидетельствовать о том, что в группе transported новорожденные имеют более высокий риск смерти по сравнению с другой.**
+
+
+
+## 4 задание
+
+Сделайте новый датафрейм, в котором оставьте только континуальные или ранговые данные, кроме 'birth', 'year' и 'exit'. Сделайте корреляционный анализ этих данных. Постройте два любых типа графиков для визуализации корреляций.
+
+
+```{r}
+
+continuous_rank_data <- cleaned_data %>%
+  select_if(~is.numeric(.) | is.ordered(.)) %>% # только континуальные или ранговые данные
+  select(-birth, -year, -exit) # кроме 'birth', 'year' и 'exit
+
+correlation_matrix <- cor(continuous_rank_data, use = "complete.obs")
+
+# 1 график
+ggcorrplot::ggcorrplot(correlation_matrix, 
+                       type = "lower", 
+                       lab = TRUE,
+                       lab_size = 3,
+                       colors = c("#6D9EC1", "white", "#E46726"),
+                       title = "Correlation matrix")
+
+# 2 график
+ggpairs(continuous_rank_data,
+        title = "Pair plots",
+        lower = list(continuous = wrap("smooth", 
+                                       size = 0.5, 
+                                       alpha = 0.8)))
+
+
+```
+
+
+## 5 задание
+
+Постройте иерархическую кластеризацию на этом датафрейме.
+
+
+```{r}
+
+# Стандартизуем данные
+scaled_data <- scale(continuous_rank_data)
+
+distance_matrix <- dist(scaled_data, method = "euclidean")
+
+# строим дерево
+hclust_result <- hclust(distance_matrix, method = "ward.D2")
+
+# Сколько кластеров?
+sil_width_df <- tibble(k = 2:10) %>%
+  mutate(clusters = map(k, ~cutree(hclust_result, k = .)),
+         silhouette_width = map_dbl(clusters, ~mean(silhouette(.x, distance_matrix)[, 3])))
+
+sil_width_df %>%
+  ggplot(aes(x = k, 
+             y = silhouette_width)) +
+  geom_point() +
+  geom_line() +
+  labs(x = "Number of custers", 
+       y = "Silhouette width") +
+  theme_minimal()
+
+
+fviz_dend(hclust_result, 
+          k = 4,  # Количество кластеров
+          rect = TRUE, 
+          rect_border = "jco", 
+          rect_fill = TRUE,
+          main = "Hierarchical clustering graph")
+
+
+```
+
+
+
+## 6 задание
+
+```{r}
+heatmap_plot <- pheatmap(correlation_matrix, 
+                         clustering_distance_rows = "euclidean", 
+                         clustering_distance_cols = "euclidean", 
+                         clustering_method = "ward.D2", 
+                         display_numbers = TRUE, 
+                         color = colorRampPalette(c("#6D9EC1", "white", "#E46726"))(20), # 20 градаций оттенков
+                         main = "Heatmap with hierarchical clustering",
+                         angle_col = 45)
+```
+
+Время нахождения в госпитале (hospstay) ассоциировано с весом при рождении (bwt) и гестационным возрастом (gest). Имеется положительная взаимосвязь между весом при рождении и гестационным возрастом.
+
+
+## 7 задание
+
+Проведите PCA анализ на этих данных. Проинтерпретируйте результат. Нужно ли применять шкалирование для этих данных перед проведением PCA?
+
+
+```{r}
+
+# PCA анализ
+pca_result <- prcomp(scaled_data, center = TRUE) #scaled_data - шкалированные данные из задания 5
+
+fviz_eig(pca_result, addlabels = TRUE)
+
+
+# загрузки переменных для каждой компоненты
+loadings <- pca_result$rotation
+loadings
+
+barplot(loadings[, 1], 
+        main = "Loadings of variables on PC1", 
+        las = 1)
+
+barplot(loadings[, 2], 
+        main = "Loadings of variables on PC2", 
+        las = 1)
+
+barplot(loadings[, 3], 
+        main = "Loadings of variables on PC3", 
+        las = 1)
+```
+
+**Большую часть дисперсии (73,8%) обуславливают три компоненты.**
+**Шкалирование было применено, так как переменные имеют разные единицы измерения и диапазоны.**
+
+
+
+## 8 задание
+
+Постройте biplot график для PCA. Раскрасьте его по значению колонки 'dead'.
+
+```{r}
+fviz_pca_biplot(pca_result, 
+                repel = TRUE,         
+                col.ind = cleaned_data$dead,  
+                palette = c("#00AFBB", "#FC4E07"), 
+                addlabels = FALSE,  
+                title = "PCA biplot colored by 'dead'",
+                addEllipses = TRUE, 
+                ellipse.level = 0.95,
+                legend.title = "dead",
+                label = "var",
+                col.var = "black")
+```
+
+
+## 9 задание
+
+Переведите последний график в 'plotly'. При наведении на точку нужно, чтобы отображалось id пациента.
+
+
+```{r}
+# 1 попытка
+ggplotly(fviz_pca_biplot(pca_result, 
+                            col.ind = cleaned_data$dead,  
+                            palette = c("#00AFBB", "#FC4E07"), 
+                            addlabels = TRUE,  
+                            title = "PCA biplot colored by 'dead'",
+                            addEllipses = TRUE, 
+                            ellipse.level = 0.95,
+                            legend.title = "dead",
+                            label = "var",
+                            col.var = "black"))
+
+# 2 попытка
+pca_data <- as.data.frame(pca_result$x)
+
+pca_data %>% 
+  mutate(id = 1:nrow(pca_data)) %>% 
+  plot_ly(x = ~PC1,
+          y = ~PC2,
+          color = ~cleaned_data$dead,
+          colors = c("#00AFBB", "#FC4E07"),
+          text = ~id,
+          hoverinfo = 'text',
+          type = 'scatter',
+          mode = 'markers') %>%
+  layout(title = "PCA Biplot Colored by 'dead'",
+         xaxis = list(title = "Dim1"),
+         yaxis = list(title = "Dim2"),
+         legend = list(title = list(text = "dead")))
+
+```
+
+**Не нашел способа и не додумался как добавить id не потеряв полную графическую аналогичность графика ((** 
+
+## 10 задание
+Дайте содержательную интерпретацию PCA анализу. Почему использовать колонку 'dead' для выводов об ассоциации с выживаемостью некорректно? 
+
+
+**Гестационный возраст, вес новорожденного, уровень тромбоцитов, длительность пребывания в госпитале и балл по шкале Апгар определяют большую часть вариации данных**
+**Использовать колонку ‘dead’ для выводов об ассоциации с выживаемостью некорректно потому что PCA направлен на исследование взаизависимости и объяснение общей дисперсии числовых переменных, а не на оценку причинно-следственной связи с бинарными исходами.**
+
+## 11 задание
+
+Приведите ваши данные к размерности в две колонки через UMAP. Сравните результаты отображения точек между алгоритмами PCA и UMAP.
+
+```{r}
+
+umap_result <- umap(scaled_data)  # Используем данные, которые были шкалированы в задании 5
+
+
+umap_data <- as.data.frame(umap_result$layout) # Извлекаем координаты
+
+ggplot(umap_data, aes(V1, V2)) +
+  geom_point(aes(color = cleaned_data$dead), alpha = 0.6) +
+  scale_color_manual(values = c("#00AFBB", "#FC4E07")) +
+  theme_minimal()
+  
+
+```
+
+**При UMAP формируются более выраженные локальные кластеры**
+
+## 12 задание
+
+Давайте самостоятельно увидим, что снижение размерности – это группа методов, славящаяся своей неустойчивостью. Измените основные параметры UMAP (n_neighbors и min_dist) и проанализируйте, как это влияет на результаты.
+
+
+```{r}
+# Определяем новые параметры UMAP
+umap_config1 <- umap.defaults
+umap_config1$n_neighbors <- 50
+umap_config1$min_dist <- 0.5
+
+umap_result1 <- umap(scaled_data, config = umap_config1)
+umap_data1 <- as.data.frame(umap_result1$layout)
+
+ggplot(umap_data1, aes(V1, V2)) +
+  geom_point(aes(color = cleaned_data$dead), alpha = 0.6) +
+  scale_color_manual(values = c("#00AFBB", "#FC4E07")) +
+  theme_minimal() +
+  ggtitle("UMAP with n_neighbors = 50, min_dist = 0.5")
+
+# Изменяемм параметры 2 пример
+umap_config2 <- umap.defaults
+umap_config2$n_neighbors <- 50
+umap_config2$min_dist <- 0.1
+
+umap_result2 <- umap(scaled_data, config = umap_config2)
+umap_data2 <- as.data.frame(umap_result2$layout)
+
+ggplot(umap_data2, aes(V1, V2)) +
+  geom_point(aes(color = cleaned_data$dead), alpha = 0.6) +
+  scale_color_manual(values = c("#00AFBB", "#FC4E07")) +
+  theme_minimal() +
+  ggtitle("UMAP with n_neighbors = 50, min_dist = 0.1")
+
+
+# Изменяем параметры 3 пример
+umap_config2 <- umap.defaults
+umap_config2$n_neighbors <- 10
+umap_config2$min_dist <- 0.5
+
+umap_result2 <- umap(scaled_data, config = umap_config2)
+umap_data2 <- as.data.frame(umap_result2$layout)
+
+ggplot(umap_data2, aes(V1, V2)) +
+  geom_point(aes(color = cleaned_data$dead), alpha = 0.6) +
+  scale_color_manual(values = c("#00AFBB", "#FC4E07")) +
+  theme_minimal() +
+  ggtitle("UMAP with n_neighbors = 10, min_dist = 0.5")
+
+
+# Изменяем параметры 4 пример
+umap_config2 <- umap.defaults
+umap_config2$n_neighbors <- 10
+umap_config2$min_dist <- 0.1
+
+umap_result2 <- umap(scaled_data, config = umap_config2)
+umap_data2 <- as.data.frame(umap_result2$layout)
+
+ggplot(umap_data2, aes(V1, V2)) +
+  geom_point(aes(color = cleaned_data$dead), alpha = 0.6) +
+  scale_color_manual(values = c("#00AFBB", "#FC4E07")) +
+  theme_minimal() +
+  ggtitle("UMAP with n_neighbors = 10, min_dist = 0.1")
+
+
+```
+
+**Уменьшение минимальной дистанции увеличивает плотность расположения точек. При уменьшении числа ближайших соседей размер кластеров сокращается**
+
+## 13 задание
+
+Давайте самостоятельно увидим, что снижение размерности – это группа методов, славящаяся своей неустойчивостью. Пермутируйте 50% и 100% колонки 'bwt'. Проведите PCA и UMAP анализ. Наблюдаете ли вы изменения в куммулятивном проценте объяснённой вариации PCA? В итоговом представлении данных на биплотах для PCA? Отличается ли визуализация данных?
+
+
+```{r}
+data_perm_50 <- continuous_rank_data
+data_perm_100 <- continuous_rank_data
+
+# Пермутируем 50% значений
+set.seed(123)
+perm_indices_50 <- sample(1:nrow(continuous_rank_data), size = 0.5 * nrow(continuous_rank_data))
+data_perm_50$bwt[perm_indices_50] <- sample(data_perm_50$bwt[perm_indices_50])
+
+# Пермутируем 100% значений
+set.seed(456)
+data_perm_100$bwt <- sample(data_perm_100$bwt)
+
+#sum(data_perm_50$bwt == continuous_rank_data$bwt)
+#sum(data_perm_100$bwt == continuous_rank_data$bwt)
+```
+
+
+### PCA анализ Пермутирование 50%
+
+```{r}
+
+scaled_data_perm_50 <- scale(data_perm_50)
+
+# PCA анализ
+pca_result_perm_50 <- prcomp(scaled_data_perm_50, center = TRUE) 
+
+fviz_eig(pca_result_perm_50, addlabels = TRUE)
+
+
+# загрузки переменных для каждой компоненты
+loadings_perm_50 <- pca_result_perm_50$rotation
+loadings_perm_50
+
+barplot(loadings_perm_50[, 1], 
+        main = "Loadings of variables on PC1", 
+        las = 1)
+
+barplot(loadings_perm_50[, 2], 
+        main = "Loadings of variables on PC2", 
+        las = 1)
+
+barplot(loadings[, 3], 
+        main = "Loadings of variables on PC3", 
+        las = 1)
+
+fviz_pca_biplot(pca_result_perm_50, 
+                repel = TRUE,         
+                col.ind = cleaned_data$dead,  
+                palette = c("#00AFBB", "#FC4E07"), 
+                addlabels = FALSE,  
+                title = "PCA biplot colored by 'dead'",
+                addEllipses = TRUE, 
+                ellipse.level = 0.95,
+                legend.title = "dead",
+                label = "var",
+                col.var = "black")
+```
+
+
+### PCA анализ Пермутирование 100%
+
+```{r}
+
+scaled_data_perm_100 <- scale(data_perm_100)
+
+# PCA анализ
+pca_result_perm_100 <- prcomp(scaled_data_perm_100, center = TRUE)
+
+fviz_eig(pca_result_perm_100, addlabels = TRUE)
+
+
+# загрузки переменных для каждой компоненты
+loadings_perm_100 <- pca_result_perm_100$rotation
+loadings_perm_100
+
+barplot(loadings_perm_100[, 1], 
+        main = "Loadings of variables on PC1", 
+        las = 1)
+
+barplot(loadings_perm_100[, 2], 
+        main = "Loadings of variables on PC2", 
+        las = 1)
+
+barplot(loadings[, 3], 
+        main = "Loadings of variables on PC3", 
+        las = 1)
+
+fviz_pca_biplot(pca_result_perm_100, 
+                repel = TRUE,         
+                col.ind = cleaned_data$dead,  
+                palette = c("#00AFBB", "#FC4E07"), 
+                addlabels = FALSE,  
+                title = "PCA biplot colored by 'dead'",
+                addEllipses = TRUE, 
+                ellipse.level = 0.95,
+                legend.title = "dead",
+                label = "var",
+                col.var = "black")
+```
+**С увеличением числа пермутаций кумулятивный процент для первых компонент уменьшается. Значительные изменения на биплотах для PCA.**
+
+### UMAP анализ Пермутирование 50%
+
+```{r}
+umap_result_perm_50 <- umap(scaled_data_perm_50)  # Используем данные, которые были шкалированы в задании 5
+
+
+umap_data_perm_50 <- as.data.frame(umap_result_perm_50$layout) # Извлекаем координаты
+
+ggplot(umap_data_perm_50, aes(V1, V2)) +
+  geom_point(aes(color = cleaned_data$dead), alpha = 0.6) +
+  scale_color_manual(values = c("#00AFBB", "#FC4E07")) +
+  theme_minimal()
+```
+
+### UMAP анализ Пермутирование 100%
+
+```{r}
+umap_result_perm_100 <- umap(scaled_data_perm_100)  # Используем данные, которые были шкалированы в задании 5
+
+
+umap_data_perm_100 <- as.data.frame(umap_result_perm_100$layout) # Извлекаем координаты
+
+ggplot(umap_data_perm_100, aes(V1, V2)) +
+  geom_point(aes(color = cleaned_data$dead), alpha = 0.6) +
+  scale_color_manual(values = c("#00AFBB", "#FC4E07")) +
+  theme_minimal()
+```
+
+
+## 14 задание
+
+Давайте проведем анализ чувствительности. Проведите анализ, как в шагах 4-6 для оригинального с удалением всех строк с пустыми значениями (т.е. включая колонки с количеством пропущенных значений больше 100), а затем для оригинального датафрейма с импутированием пустых значений средним или медианой. Как отличаются получившиеся результаты? В чем преимущества и недостатки каждого подхода?
+
+### для оригинального с удалением всех строк с пустыми значениями (т.е. включая колонки с количеством пропущенных значений больше 100)
+
+```{r}
+data <- read_rds("very_low_birthweight.rds")
+#glimpse(data)
+
+cleaned_data <- data %>%
+  drop_na() %>% 
+  mutate(across(c(twn, vent, pneumo, pda, cld, dead, meth, magsulf, toc), as.factor))
+  
+
+# 4 шаг
+continuous_rank_data <- cleaned_data %>%
+  select_if(~is.numeric(.) | is.ordered(.)) %>% # только континуальные или ранговые данные
+  select(-birth, -year, -exit) # кроме 'birth', 'year' и 'exit
+
+correlation_matrix <- cor(continuous_rank_data, use = "complete.obs")
+
+# 1 график
+ggcorrplot::ggcorrplot(correlation_matrix, 
+                       type = "lower", 
+                       lab = TRUE,
+                       lab_size = 3,
+                       colors = c("#6D9EC1", "white", "#E46726"),
+                       title = "Correlation matrix")
+
+# 2 график
+ggpairs(continuous_rank_data,
+        title = "Pair plots",
+        lower = list(continuous = wrap("smooth", 
+                                       size = 0.5, 
+                                       alpha = 0.8)))
+
+# 5 шаг
+# Стандартизуем данные
+scaled_data <- scale(continuous_rank_data)
+
+distance_matrix <- dist(scaled_data, method = "euclidean")
+
+# строим дерево
+hclust_result <- hclust(distance_matrix, method = "ward.D2")
+
+# Сколько кластеров?
+sil_width_df <- tibble(k = 2:10) %>%
+  mutate(clusters = map(k, ~cutree(hclust_result, k = .)),
+         silhouette_width = map_dbl(clusters, ~mean(silhouette(.x, distance_matrix)[, 3])))
+
+sil_width_df %>%
+  ggplot(aes(x = k, 
+             y = silhouette_width)) +
+  geom_point() +
+  geom_line() +
+  labs(x = "Number of custers", 
+       y = "Silhouette width") +
+  theme_minimal()
+
+
+fviz_dend(hclust_result, 
+          k = 4,  # Количество кластеров
+          rect = TRUE, 
+          rect_border = "jco", 
+          rect_fill = TRUE,
+          main = "Hierarchical clustering graph")
+
+
+# 6 шаг
+heatmap_plot <- pheatmap(correlation_matrix, 
+                         clustering_distance_rows = "euclidean", 
+                         clustering_distance_cols = "euclidean", 
+                         clustering_method = "ward.D2", 
+                         display_numbers = TRUE, 
+                         color = colorRampPalette(c("#6D9EC1", "white", "#E46726"))(20), # 20 градаций оттенков
+                         main = "Heatmap with hierarchical clustering",
+                         angle_col = 45)
+```
+
+### для оригинального датафрейма с импутированием пустых значений средним или медианой
+
+```{r}
+data <- read_rds("very_low_birthweight.rds")
+#glimpse(data)
+
+cleaned_data <- data %>%
+  select_if(is.numeric) %>% 
+  mutate(across(everything(), ~ ifelse(is.na(.), median(., na.rm = TRUE), .)))
+
+cleaned_data <- cleaned_data %>% 
+  mutate(across(c(twn, vent, pneumo, pda, cld, dead, meth, magsulf, toc), as.factor))
+  
+
+
+# 4 шаг
+continuous_rank_data <- cleaned_data %>%
+  select_if(~is.numeric(.) | is.ordered(.)) %>% # только континуальные или ранговые данные
+  select(-birth, -year, -exit) # кроме 'birth', 'year' и 'exit
+
+correlation_matrix <- cor(continuous_rank_data, use = "complete.obs")
+
+# 1 график
+ggcorrplot::ggcorrplot(correlation_matrix, 
+                       type = "lower", 
+                       lab = TRUE,
+                       lab_size = 3,
+                       colors = c("#6D9EC1", "white", "#E46726"),
+                       title = "Correlation matrix")
+
+# 2 график
+ggpairs(continuous_rank_data,
+        title = "Pair plots",
+        lower = list(continuous = wrap("smooth", 
+                                       size = 0.5, 
+                                       alpha = 0.8)))
+
+# 5 шаг
+# Стандартизуем данные
+scaled_data <- scale(continuous_rank_data)
+
+distance_matrix <- dist(scaled_data, method = "euclidean")
+
+# строим дерево
+hclust_result <- hclust(distance_matrix, method = "ward.D2")
+
+# Сколько кластеров?
+sil_width_df <- tibble(k = 2:10) %>%
+  mutate(clusters = map(k, ~cutree(hclust_result, k = .)),
+         silhouette_width = map_dbl(clusters, ~mean(silhouette(.x, distance_matrix)[, 3])))
+
+sil_width_df %>%
+  ggplot(aes(x = k, 
+             y = silhouette_width)) +
+  geom_point() +
+  geom_line() +
+  labs(x = "Number of custers", 
+       y = "Silhouette width") +
+  theme_minimal()
+
+
+fviz_dend(hclust_result, 
+          k = 4,  # Количество кластеров
+          rect = TRUE, 
+          rect_border = "jco", 
+          rect_fill = TRUE,
+          main = "Hierarchical clustering graph")
+
+
+
+# 6 шаг
+heatmap_plot <- pheatmap(correlation_matrix, 
+                         clustering_distance_rows = "euclidean", 
+                         clustering_distance_cols = "euclidean", 
+                         clustering_method = "ward.D2", 
+                         display_numbers = TRUE, 
+                         color = colorRampPalette(c("#6D9EC1", "white", "#E46726"))(20), # 20 градаций оттенков
+                         main = "Heatmap with hierarchical clustering",
+                         angle_col = 45)
+```
+
+**При замене пропусков медианами сильно имзенились кэффициенты корреляции. Изменились также кластеры при кластеризации данных. В целом, при заполнении пропусков мы увеличиваем объем данных для анализа. Однако если пропусков много, то это отразится на резльутатх стат анализа (сравнение средних, корреляции, кластеризации и т.п.)**
+
+
+## 15 задание
+
+### для оригинального с удалением всех строк с пустыми значениями (т.е. включая колонки с количеством пропущенных значений больше 100)
+
+```{r}
+data <- read_rds("very_low_birthweight.rds")
+#glimpse(data)
+
+cleaned_data <- data %>%
+  drop_na() %>% 
+  mutate(across(c(twn, vent, pneumo, pda, cld, dead, meth, magsulf, toc), as.factor))
+  
+continuous_rank_data <- cleaned_data %>%
+  select_if(~is.numeric(.) | is.ordered(.)) %>% # только континуальные или ранговые данные
+  select(-birth, -year, -exit) # кроме 'birth', 'year' и 'exit
+
+# PCA анализ
+scaled_data <- scale(continuous_rank_data)
+pca_result <- prcomp(scaled_data, center = TRUE) #scaled_data - шкалированные данные из задания 5
+
+fviz_eig(pca_result, addlabels = TRUE)
+
+
+# загрузки переменных для каждой компоненты
+loadings <- pca_result$rotation
+loadings
+
+barplot(loadings[, 1], 
+        main = "Loadings of variables on PC1", 
+        las = 1)
+
+barplot(loadings[, 2], 
+        main = "Loadings of variables on PC2", 
+        las = 1)
+
+barplot(loadings[, 3], 
+        main = "Loadings of variables on PC3", 
+        las = 1)
+
+fviz_pca_biplot(pca_result, 
+                repel = TRUE,         
+                col.ind = cleaned_data$dead,  
+                palette = c("#00AFBB", "#FC4E07"), 
+                addlabels = FALSE,  
+                title = "PCA biplot colored by 'dead'",
+                addEllipses = TRUE, 
+                ellipse.level = 0.95,
+                legend.title = "dead",
+                label = "var",
+                col.var = "black")
+
+# UMAP
+umap_result <- umap(scaled_data)  # Используем данные, которые были шкалированы в задании 5
+
+umap_data <- as.data.frame(umap_result$layout) # Извлекаем координаты
+
+ggplot(umap_data, aes(V1, V2)) +
+  geom_point(aes(color = cleaned_data$dead), alpha = 0.6) +
+  scale_color_manual(values = c("#00AFBB", "#FC4E07")) +
+  theme_minimal()
+```
+
+
+### для оригинального датафрейма с импутированием пустых значений медианой
+
+```{r}
+data <- read_rds("very_low_birthweight.rds")
+#glimpse(data)
+
+cleaned_data <- data %>%
+  select_if(is.numeric) %>% 
+  mutate(across(everything(), ~ ifelse(is.na(.), median(., na.rm = TRUE), .)))
+
+cleaned_data <- cleaned_data %>% 
+  mutate(across(c(twn, vent, pneumo, pda, cld, dead, meth, magsulf, toc), as.factor))
+  
+continuous_rank_data <- cleaned_data %>%
+  select_if(~is.numeric(.) | is.ordered(.)) %>% # только континуальные или ранговые данные
+  select(-birth, -year, -exit) # кроме 'birth', 'year' и 'exit
+
+# PCA анализ
+scaled_data <- scale(continuous_rank_data)
+pca_result <- prcomp(scaled_data, center = TRUE)
+
+fviz_eig(pca_result, addlabels = TRUE)
+
+
+# загрузки переменных для каждой компоненты
+loadings <- pca_result$rotation
+loadings
+
+barplot(loadings[, 1], 
+        main = "Loadings of variables on PC1", 
+        las = 1)
+
+barplot(loadings[, 2], 
+        main = "Loadings of variables on PC2", 
+        las = 1)
+
+barplot(loadings[, 3], 
+        main = "Loadings of variables on PC3", 
+        las = 1)
+
+fviz_pca_biplot(pca_result, 
+                repel = TRUE,         
+                col.ind = cleaned_data$dead,  
+                palette = c("#00AFBB", "#FC4E07"), 
+                addlabels = FALSE,  
+                title = "PCA biplot colored by 'dead'",
+                addEllipses = TRUE, 
+                ellipse.level = 0.95,
+                legend.title = "dead",
+                label = "var",
+                col.var = "black")
+
+# UMAP
+umap_result <- umap(scaled_data)  # Используем данные, которые были шкалированы в задании 5
+
+umap_data <- as.data.frame(umap_result$layout) # Извлекаем координаты
+
+ggplot(umap_data, aes(V1, V2)) +
+  geom_point(aes(color = cleaned_data$dead), alpha = 0.6) +
+  scale_color_manual(values = c("#00AFBB", "#FC4E07")) +
+  theme_minimal()
+```
+
+
+**При замене пропусков медианой, снизился вклад первой компоненты и вклад переменных. Сильно отличаются результаты UMAP - аблюдаются выделения данных в отдельные кластеры.**
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

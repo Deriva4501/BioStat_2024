@@ -1,0 +1,122 @@
+library(tidyverse)
+library(readr)
+library(car)
+
+data <- read_rds("very_low_birthweight.rds")
+glimpse(data)
+
+data_processed <- data %>% 
+  select(where(~ sum(is.na(.)) <= 100)) %>% 
+  drop_na()
+
+glimpse(data_processed)
+data_processed <- data_processed %>% 
+  mutate(across(c(twn, vent, pneumo, pda, cld, dead), as.factor))
+
+data_processed %>% 
+  select_if(is.numeric) %>% 
+  pivot_longer(cols = everything(), names_to = "variable", values_to = "value") %>% 
+  ggplot() +
+  geom_density(aes(x = value)) +
+  facet_wrap(~ variable, scales = "free")
+
+
+outliers <- data_processed %>% 
+  select_if(is.numeric) %>% 
+  map(~ {
+    if (shapiro.test(.)$p.value < 0.05) {
+      q1 <- quantile(., 0.25, na.rm = TRUE)
+      q2 <- quantile(., 0.75, na.rm = TRUE)
+      return(which(. < q1 - (1.5 * IQR(.)) | . > q2 + (1.5 * IQR(.))))
+      }
+    else {
+      return(which(. < mean(.) - (2*sd(.)) | . > mean(.) + (2*sd(.))))
+    }
+  })
+
+# Идентификация выбросов и замена их на NA
+data_cleaned <- data_processed %>%
+  mutate(across(where(is.numeric), ~ {
+    if (shapiro.test(.)$p.value < 0.05) {  # Если данные распределены ненормально
+      q1 <- quantile(., 0.25, na.rm = TRUE)
+      q3 <- quantile(., 0.75, na.rm = TRUE)
+      iqr <- IQR(., na.rm = TRUE)
+      return(ifelse(. < (q1 - 1.5 * iqr) | . > (q3 + 1.5 * iqr), NA, .))  # Заменяем выбросы на NA
+    } else {  # Для ненормальных данных
+      mean_value <- mean(., na.rm = TRUE)
+      sd_value <- sd(., na.rm = TRUE)
+      return(ifelse(. < (mean_value - 2 * sd_value) | . > (mean_value + 2 * sd_value), NA, .))  # Заменяем выбросы на NA
+    }
+  }))
+
+sum(is.na(data_cleaned))
+
+data_cleaned %>% 
+  select_if(is.numeric) %>% 
+  pivot_longer(cols = everything(), names_to = "variable", values_to = "value") %>% 
+  ggplot() +
+  geom_density(aes(x = value)) +
+  theme_minimal() +
+  facet_wrap(~ variable, scales = "free")
+
+data_cleaned %>%
+  select(apg1, birth, inout) %>%
+  pivot_longer(cols = c(apg1, birth), names_to = "variable", values_to = "value") %>%
+  ggplot() + 
+  geom_density(aes(x = value, color = inout)) +
+  theme_minimal() +
+  facet_wrap(~ variable, scales = "free") +
+  scale_color_manual(values = c("born at Duke" = "red",
+                                "transported" = "blue"))
+
+
+
+
+
+#####################################33
+
+
+glimpse(data_cleaned)
+
+ggplot(data_cleaned, aes(sample = lowph)) +
+  geom_qq() +
+  geom_qq_line(size = 1) +
+  facet_wrap(~ inout) +
+  labs(
+    title = "QQ-plots",
+    x = "Theoretical quantile",
+    y = "Empirical quantile"
+  ) +
+  theme_minimal() +
+  theme(strip.text = element_text(size = 14))
+
+leveneTest(lowph ~ inout, data_cleaned)
+
+length(data$inout ~ data_cleaned$lowph)
+
+t.test(lowph ~ inout, data_cleaned)
+
+result <- t.test(lowph ~ inout, data = data_cleaned)
+
+ggplot(data_cleaned, aes(x = inout, y = lowph)) +
+  geom_boxplot()
+
+
+install.packages("rstatix")
+library(rstatix)
+
+# Проведение t-теста
+result <- t.test(lowph ~ inout, data = data_cleaned)
+
+# Визуализация через boxplot с результатами t-теста
+data_cleaned %>%
+  ggplot(aes(x = inout, y = lowph, fill = inout)) +
+  geom_boxplot() +
+  add_significance(result) +  # Добавляем аннотацию результата t-теста
+  theme_minimal() +
+  labs(title = "T-test: lowph by inout",
+       subtitle = paste("p-value =", round(result$p, 3)),
+       x = "inout",
+       y = "lowph") +
+  theme(legend.position = "none")
+
