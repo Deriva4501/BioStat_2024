@@ -83,7 +83,13 @@ ADMH <- ADSL_processed %>%
   left_join(dates_processed, by = c("STUDYID", "SUBJID", "MHSEQ")) %>%
   select(STUDYID, USUBJID, TRTP, TRTPN, MHSEQ, MHCAT, MHTERM, MHDECOD, MHBODSYS,
          MHSTDTC, ASTDT, ASTDTF, MHENDTC, AENDT, AENDTF, MHENRTPT, MHENRF) %>%
-  filter(!is.na(MHTERM))
+  filter(MHTERM != "",
+         MHCAT == "Medical History")
 
+```
+
+
+```{r}
+write.xlsx(ADMH, "./ADaM-like/ADMH.xlsx")
 ```
 
