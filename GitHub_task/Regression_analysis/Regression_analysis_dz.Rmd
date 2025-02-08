@@ -1,7 +1,7 @@
 ---
 title: "Regression_ analysis"
 author: "Ivan Derkachev"
-date: "2024-12-22"
+date: "2024-02-07"
 output: 
    html_document:
        toc: true
@@ -26,6 +26,9 @@ library(performance)
 library(lmtest)
 library(sandwich)
 library(emmeans)
+library(flextable)
+library(gvlma)
+library(bestNormalize)
 
 ```
 
@@ -34,11 +37,89 @@ library(emmeans)
 
 ```{r}
 
-data <- read_xlsx("HW_data.xlsx")
+data_raw <- read_xlsx("HW_data.xlsx")
 
 ```
 
-# Оценка физической активности респондентов 
+
+
+## Проверка датасета
+### Проверка на пропущенные значения
+
+```{r}
+if(sum(is.na(data)) == 0) {
+  cat("Пропущеннных значений нет")
+} else cat("Число пропущеннных значений:", sum(is.na(data)))
+```
+
+### Проверка на выбросы (1.5 IQR)
+```{r}
+find_outliers_flextable <- function(df) {
+  
+  # Проверяем наличие числовых переменных
+  numeric_cols <- sapply(df, is.numeric)
+  if (!any(numeric_cols)) {
+    stop("Нет числовых переменных в датафрейме.")
+  }
+  
+  # Находим выбросы для каждой числовой переменной
+  outliers_list <- lapply(df[, numeric_cols, drop = FALSE], function(column) {
+    stats <- boxplot.stats(column)
+    return(stats$out)  # Возвращаем выбросы
+  })
+  
+  # Оставляем только переменные с выбросами
+  outliers_list <- outliers_list[sapply(outliers_list, function(x) length(x) > 0)]
+  
+  # Если выбросов нет
+  if (length(outliers_list) == 0) {
+    message("Выбросов не найдено!")
+    return(NULL)
+  }
+  
+  # Создаем таблицу с результатами
+  outliers_table <- data.frame(
+    Variable = names(outliers_list),  # Имена переменных
+    Num_Outliers = sapply(outliers_list, length),  # Количество выбросов
+    Outliers = sapply(outliers_list, function(x) paste(x, collapse = ", ")),  # Значения выбросов
+    stringsAsFactors = FALSE
+  )
+  
+  # Преобразуем таблицу в flextable
+  ft <- flextable(outliers_table)
+  
+  # Настройка внешнего вида таблицы
+  ft <- set_header_labels(ft, Variable = "Переменная", Num_Outliers = "Количество выбросов", Outliers = "Значения выбросов")
+  ft <- autofit(ft)
+  
+  return(ft)
+}
+
+
+selected_vars <- c("PAQ605", "PAQ610", "PAD615",
+                     "PAQ620", "PAQ625", "PAD630",
+                     "PAQ635", "PAQ640", "PAD645",
+                     "PAQ650", "PAQ655", "PAD660",
+                     "PAQ665", "PAQ670", "PAD675",
+                     "PAD680")
+
+#find_outliers_flextable(data_raw[selected_vars])
+```
+
+Бросается в глаза наличие двух значений "9999" в переменной PAD680. Удалим их.
+Остальные перменные Будут проанализированы позже, после составления датафрейма.
+
+### Удаление значений
+```{r}
+
+data <- data_raw %>% 
+  filter(PAD680 != 9999)
+```
+
+
+# Задание 1. 
+
+Оценка физической активности респондентов 
 
 **Для оценки физической активности использованы следующие параметры:**
 
@@ -65,7 +146,7 @@ data <- read_xlsx("HW_data.xlsx")
 17) PAD680 - Minutes sedentary activity
 
 
-**Для оценки физической активности респондентов выполнялся перевод времени активности в метаболические эквиваленты (MET).**
+**Для оценки физической активности респондентов выполнялся перевод времени активности в метаболические эквиваленты активности в неделю (MET).**
 
 *Использована литература: Haskell WL, Lee IM, Pate RR, et al. Physical activity and public health: updated recommendation for adults from the American College of Sports Medicine and the American Heart Association. Med Sci Sports Exerc. 2007;39(8):1423-1434. doi:10.1249/mss.0b013e3180616b27*
 
@@ -83,7 +164,7 @@ MET_moderate <- 5
 MET_walk_bicycle <- (3+6) /2
 MET_sedentary <- 1
 
-data <- data %>% 
+data_MET <- data %>% 
   mutate(
     PAQ605 = recode(PAQ605, `1` = 1, `2` = 0),
     PAQ620 = recode(PAQ620, `1` = 1, `2` = 0),
@@ -110,14 +191,16 @@ data <- data %>%
 Основная гипотеза заключается в том, что физическая активность, измеряемая с помощью MET, влияет на уровень гликированного гемоглобина через механизмы, включающие снижение инсулинорезистентности и поддержание нормального уровня глюкозы в крови.
 
 
-# Ковариаты показателей, включенных в модель для коррекции эффекта физической активности в отношении гликированного гемоглобина
+# Задание 2.
+
+Ковариаты показателей, включенных в модель для коррекции эффекта физической активности в отношении гликированного гемоглобина
 
 **Ковариаты для коррекции:**
 
 1) Age (количесвтенная переменная RIDAGEYR)
 2) Sex (категориальная переменная RIAGENDR). Две категории: 1 - Male, 2 - Female  
 3) Race (категориальная переменная RIDRETH3). 
-Семь категорий: 1	- Mexican American, 2 -	Other Hispanic, 3 -	Non-Hispanic White, 4 -	Non-Hispanic Black, 6 -	6. Non-Hispanic Asian, 7 -	Other Race - Including Multi-Racial  
+Шесть категорий: 1	- Mexican American, 2 -	Other Hispanic, 3 -	Non-Hispanic White, 4 -	Non-Hispanic Black, 6 - Non-Hispanic Asian, 7 -	Other Race - Including Multi-Racial  
 4) Education (категориальная переменная DMDEDUC2. 
 Пять категорий: 1	- Less than 9th grade, 2 - 9-11th grade (Includes 12th grade with no diploma), 3 - High school graduate/GED or equivalent, 4 - Some college or AA degree, 5 - College graduate or above)  
 5) Family income (катогриальная переменная INDFMIN2). 
@@ -134,29 +217,67 @@ data <- data %>%
 **Ответ:** Age - конфаундер, Comorbidities - конфаундер, Education - конфаундер, Family income - конфаундер, Race - конфаундер, Sex - конфаундер, Smoking - proxy конфаундер, Blood pressure - коллайдер, Diabetic medication - коллайдер, Marital status - parent exposure, BMI - медиатор.
 
 
-# Эксплораторный анализ
+# Задание 3.
 
-```{r, fig.width=16, fig.height=16}
-data <- data %>% 
+Эксплораторный анализ
+
+```{r}
+data <- data_MET %>% 
   mutate(
     Age = RIDAGEYR,
     Sex = as.factor(ifelse(RIAGENDR == 1, "Male", "Female")),
-    Race = as.factor(RIDRETH3),
-    Education = as.factor(DMDEDUC2),
-    Family_income = as.factor(INDFMIN2),
+    Race = as.factor(RIDRETH3) %>%
+      fct_recode(
+        "Mexican_American" = "1",
+        "Other_Hispanic" = "2",
+        "Non-Hispanic_White" = "3",
+        "Non-Hispanic_Black" = "4",
+        "Non-Hispanic_Asian" = "6",
+        "Other_Race" = "7"
+      ),
+    Education = as.factor(DMDEDUC2) %>%
+      fct_recode(
+        "Less_9th-grade" = "1",
+        "9-11th_grade" = "2",
+        "High_school_graduate/GED" = "3",
+        "Some_college" = "4",
+        "College_graduate_or_above" = "5"
+      ),
+    Family_income = as.factor(INDFMIN2) %>%
+      fct_recode(
+        "0-4,999" = "1",
+        "5,000-9,999" = "2",
+        "10,000-14,999" = "3",
+        "15,000-19,999" = "4",
+        "20,000-24,999" = "5",
+        "25,000-34,999" = "6",
+        "35,000-44,999" = "7",
+        "45,000-54,999" = "8",
+        "55,000-64,999" = "9",
+        "65,000-74,999" = "10",
+        "75,000-99,999" = "11",
+        "100,000-Over" = "12"
+      ),
     Comorbidities = ifelse(
       rowSums(select(., starts_with("MCQ"), BPQ020, DIQ010) == 1) > 0, 
-      "yes", "no") %>% as.factor(),
-    Smoking = as.factor(SMQ040),
+      "Yes", "No"
+    ) %>% as.factor(),
+    Smoking = as.factor(SMQ040) %>%
+      fct_recode(
+        "Every_day" = "1",
+        "Some_days" = "2",
+        "Not_at_all" = "3"
+      ),
     Glycohemoglobin = LBXGH
   ) %>%
   select(
-    c(SEQN, Age, Sex, Race, Education, 
-      Family_income, Comorbidities, Smoking, Total_MET, Glycohemoglobin))
+    c(Age, Sex, Race, Education, 
+      Family_income, Comorbidities, Smoking, Total_MET, Glycohemoglobin)
+    )
          
 
 tbl_summary(
-  data, include = -c(SEQN), 
+  data, 
   type = list(all_continuous() ~ "continuous2"),
   statistic = list(
     all_continuous() ~ c("{N_nonmiss}", "{mean} ({sd})", "{median} ({p25}-{p75})", "{min}-{max}")
@@ -166,63 +287,197 @@ tbl_summary(
 
 
 
-ggpairs(
-  data %>% select(Age, Sex, Race, Education, Family_income, Comorbidities, Smoking, Total_MET, Glycohemoglobin), 
-  upper = list(continuous = wrap("points", alpha = 0.5, size = 1),
-               combo = wrap("points", alpha = 0.5, size = 1),
-               disrete = "blank"),
-  lower = list(continuous = "cor",
-               discrete = "count",
-               combo = wrap("box_no_facet", outlier.size = 0.5)),
-  diag = list(continuous = "barDiag",
-              discrete = "barDiag"),
-  showStrips = TRUE, progress = FALSE) +
-  theme_bw(base_size = 12) +
-  theme(axis.text.x = element_text(angle = 90, hjust = 1),
-        panel.grid.minor = element_blank(),
-        strip.placement = "outside",
-        strip.background = element_rect(color = "white", fill = "#EFEBE9"),
-        strip.text = element_text(size = 10, face = "bold"))
+#ggpairs(
+#  data %>% select(Age, Sex, Race, Education, Family_income, Comorbidities, Smoking, Total_MET, #Glycohemoglobin), 
+#  upper = list(continuous = wrap("points", alpha = 0.5, size = 1),
+#               combo = wrap("points", alpha = 0.5, size = 1),
+#               disrete = "blank"),
+#  lower = list(continuous = "cor",
+#               discrete = "count",
+#               combo = wrap("box_no_facet", outlier.size = 0.5)),
+#  diag = list(continuous = "barDiag",
+#              discrete = "barDiag"),
+#  showStrips = TRUE, progress = FALSE) +
+#  theme_bw(base_size = 12) +
+#  theme(axis.text.x = element_text(angle = 90, hjust = 1),
+#        panel.grid.minor = element_blank(),
+#        strip.placement = "outside",
+#        strip.background = element_rect(color = "white", fill = "#EFEBE9"),
+#        strip.text = element_text(size = 10, face = "bold"))
+
 ```
 
 
+### Факторные переменные
+```{r, fig.width=10, fig.height=10}
+data %>%
+  select(Sex, Race, Education, Family_income, Comorbidities, Smoking) %>% 
+  gather(key = "Variable", value = "Value") %>%
+  ggplot(aes(x = Value)) +
+  geom_bar(fill = "steelblue") +
+  facet_wrap(~ Variable, scales = "free") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+### Числовые переменные
+```{r}
+data %>%
+  select_if(is.numeric) %>% 
+  gather(key = "Variable", value = "Value") %>%
+  ggplot(aes(x = Value)) +
+  geom_histogram(bins = 50, 
+                 fill = "steelblue", color = "black") +
+  facet_wrap(~ Variable, scales = "free") +
+  theme_minimal()
+```
+
+**Выводы:**  
+1. В выборке преобладают взрослые люди старше 40 лет, много 80-летних относительно общего числа.  
+2. В выборке больше мужчин, чем женщин  
+3. В выборке преобладает раса Non-Hispanic White, т.е. неиспаноязычное белое население США  
+4. В выборке преобладает люди с годовым заработком больше 100 тысяч в год.  
+5. В выборке преобладают некурящие люди.  
+6. Большая часть значений гликированного гемоглобина находится в пределах нормы (4 - 5.7% (до 6.5% по некоторым данным)). Однако есть много значений правее нормы.  
+6. Распределение переменной Total_MET далеко от нормального.  
 
 
-# Оценка моделей для зависимости гликированного гемоглобина от выбранного вами показателя физической активности без ковариат и с ними
+Если попытаться построить модель по исходным данным допущения линейной регрессии ожидаемо не выполняются.
+```{r}
+wrong_model <- lm(Glycohemoglobin ~ Total_MET, data = data)
+summary(wrong_model)
+
+autoplot(wrong_model)
+
+```
+
+### Удаление выбросов
+
+Для обнаружения выбросов использовался метод 1.5 IQR. Также В выборке присутсвует много 80-летних. Для того, чтобы выборка была репрезентативна для всей популяции, уберем их из данных.
+
+
+```{r}
+data_filtered <- data %>%
+  filter(rowSums(across(where(is.numeric), ~ .x %in% boxplot.stats(.x)$out)) == 0)
+
+data_filtered_numeric <- data_filtered %>%
+  select(where(is.numeric))
+
+data_filtered_non_numeric <- data_filtered %>%
+  select(where(~ !is.numeric(.)))
+
+data_cleaned <- bind_cols(data_filtered_numeric, data_filtered_non_numeric)
+
+data_cleaned <- data_cleaned %>% 
+  filter(Age != 80)
+
+```
+
+
+### Повторный анализ
+
+```{r}
+tbl_summary(
+  data_cleaned, 
+  type = list(all_continuous() ~ "continuous2"),
+  statistic = list(
+    all_continuous() ~ c("{N_nonmiss}", "{mean} ({sd})", "{median} ({p25}-{p75})", "{min}-{max}")
+  )) %>%
+  modify_footnote(everything() ~ NA) %>%
+  bold_labels()
+
+
+data_cleaned %>%
+  select(Sex, Race, Education, Family_income, Comorbidities, Smoking) %>% 
+  gather(key = "Variable", value = "Value") %>%
+  ggplot(aes(x = Value)) +
+  geom_bar(fill = "steelblue") +
+  facet_wrap(~ Variable, scales = "free") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+
+data_cleaned %>%
+  select_if(is.numeric) %>% 
+  gather(key = "Variable", value = "Value") %>%
+  ggplot(aes(x = Value)) +
+  geom_histogram(bins = 50, 
+                 fill = "steelblue", color = "black") +
+  facet_wrap(~ Variable, scales = "free") +
+  theme_minimal()
+
+```
+
+
+Теперь нужно преобразовать данные.
+
+
+Если попытаться построить модель по исходным данным допущения линейной регрессии ожидаемо не выполняются.
+```{r}
+wrong_model <- lm(Glycohemoglobin ~ Total_MET, data = data_cleaned)
+summary(wrong_model)
+
+gvlma(wrong_model)
+
+autoplot(wrong_model)
+
+```
+
+### Преобразование числовых переменных
+
+```{r}
+
+data_normalized <- data_cleaned %>%
+  select_if(is.numeric) %>%
+  mutate(across(everything(), ~ {
+    result <- bestNormalize(.x) 
+    result$x.t                   
+  }))
+
+data_normalized %>%
+  gather(key = "Variable", value = "Value") %>%
+  ggplot(aes(x = Value)) +
+  geom_histogram(bins = 50, 
+                 fill = "steelblue", color = "black") +
+  facet_wrap(~ Variable, scales = "free") +
+  theme_minimal()
+
+
+data_fact <- data_cleaned %>% 
+  select_if(is.factor)
+
+data_final <- cbind(data_fact, data_normalized)
+```
+
+# Задание 4.
+
+Оценка моделей для зависимости гликированного гемоглобина от выбранного вами показателя физической активности без ковариат и с ними
+
 
 ## Модель без ковариат
 
-**Оценка модели:**
 ```{r}
-model_no_covariates <- lm(Glycohemoglobin ~ Total_MET, data = data)
-summary(model_no_covariates)
-
+model_no_covariates <- lm(Glycohemoglobin ~ Total_MET, data = data_final)
 ```
 
+**Оценка модели:**
 
-## Диагностика модели без ковариат
-### Residuals vs Fitted, scale-location plots
+
+## Оценка модели без ковариат
+### Summary, Residuals vs Fitted, QQ, scale-location plots
 ```{r}
+summary(model_no_covariates)
 
-autoplot(model_no_covariates, which = c(1,3), label.size = 3) +
+#gvlma(model_no_covariates)
+
+autoplot(model_no_covariates, label.size = 3) +
   theme_bw()
-
 
 resid_xpanel(model_no_covariates, smoother = TRUE) +
   theme_bw()
 ```
 
-1. Присутствует явная нелинейность по мере увеличения значений физической активности, выраженной в MET. Вероятнее всего, причина этому - выбросы.  
-2.  Разброс по линии регресии примерно одинаков. Можно говорить о гомогедостичности остатков.
-
-### QQ-plot, гистограмма
-
-```{r}
-resid_panel(model_no_covariates, plots = c("qq", "hist"))
-```
-
-
-Наблюдается выраженная ассиметричность распределения. Вероятно, также по причине выбросов.
 
 ### Residuals-Leverage, COOK's D plots
 
@@ -232,49 +487,43 @@ resid_panel(model_no_covariates, plots = c("lev", "cookd"))
 ```
 
 
-Расстояние Кука < 0.5.
+### Табличное представления оценок и доверительные интервалы
+```{r}
+tidy(model_no_covariates, conf.int = TRUE)
 
+```
+
+Выводы:  
+1. Допущения линейной регрессии соблюдены.  
+2. Показана статистически значимая отрицательная линейная связь между Total_MET и Glycohemoglobin. Однако коэффициент при Total_Met несмотря на статистическую значимость близок к нулю (-0.093), что указывает на низкую клиническую значимость.  
+2. Модель объясняет только около 0.87% изменчивости уровня гликозилированного гемоглобина, что крайне мало.  
+3. Для повышения качества модели стоит рассмотреть добавление дополнительных независимых переменных.  
 
 ## Модель с ковариатами
 
-**Оценка модели:**
 
 ```{r}
-model_with_covariates <- lm(Glycohemoglobin ~ Total_MET + Age + Sex + Race + Education + 
-                              Family_income + Comorbidities + Smoking, 
-                            data = data)
-summary(model_with_covariates)
+
+model_with_covariates <- lm(Glycohemoglobin ~ Total_MET + Sex + Age + Race + Education +
+                              Comorbidities + Smoking, 
+                            data = data_final)
+
 ```
 
 
 
-## Диагностика модели с ковариатами
-### Residuals vs Fitted, scale-location plots
-```{r}
+## Оценка модели с ковариатами
+### Summary, Residuals vs Fitted, QQ, scale-location plots
 
-autoplot(model_with_covariates, which = c(1,3), label.size = 3) +
+```{r}
+summary(model_with_covariates)
+
+autoplot(model_with_covariates, label.size = 3) +
   theme_bw()
 
+resid_xpanel(model_no_covariates, smoother = TRUE) +
+  theme_bw()
 ```
-
-
-
-```{r}
-resid_xpanel(model_with_covariates, smoother = TRUE)
-```
-
-1. Присутствует нелинейность по мере увеличения значений физической активности, выраженной в MET. Вероятнее всего, причина этому - выбросы.  
-2.  Разброс по линии регресии примерно одинаков. Можно говорить о гомогедостичности остатков.
-
-
-### QQ-plot, гистограмма
-
-```{r}
-resid_panel(model_with_covariates, plots = c("qq", "hist"))
-```
-
-Наблюдается выраженная ассиметричность распределения. Вероятно, также по причине выбросов.
-
 
 ### Residuals-Leverage, COOK's D plots
 
@@ -283,10 +532,6 @@ resid_panel(model_with_covariates, plots = c("qq", "hist"))
 resid_panel(model_with_covariates, plots = c("lev", "cookd"))
 ```
 
-Расстояние Кука < 0.5.
-
-
-
 ### Оценка мультиколлинеарности.
 
 ```{r, fig.width=12, fig.height=5}
@@ -294,201 +539,236 @@ resid_panel(model_with_covariates, plots = c("lev", "cookd"))
 vif(model_with_covariates)
 check_model(model_with_covariates, check ="vif")
 
-
 ```
 
-VIF < 5. Все в пределах нормы. Мультиколлинеарности нет.
 
 
-
-## Табличное представления оценок и доверительные интервалы
+### Табличное представления оценок и доверительные интервалы
 
 ```{r}
 tidy(model_with_covariates, conf.int = TRUE)
 
 ```
 
+**Выводы:**  
+1. Допущения линейной регрессии в целом соблюдены.Не наблюдается сильного смещения остатков. Распределение остатков выглядит относительно симметричным. Однако, наличие некоторых выбросов может указывать на то, что модель не полностью учитывает все особенности данных. VIF < 2 - мультиколлинеарности нет.
 
+Коэффиценты модели:  
+1. Возраст (Age): Возраст имеет сильное положительное влияние на уровень гликогемоглобина (p-value < 0.001). Это означает, что с увеличением возраста уровень гликогемоглобина увеличивается.  
+2. Раса (Race):  
+Non-Hispanic Black и Non-Hispanic Asian имеют значимое положительное влияние на уровень гликогемоглобина (p-value < 0.01 и p-value < 0.001 соответственно). Другие расовые группы не показали значимого влияния.
+3. Образование (Education):  
+Все уровни образования, начиная с "High school graduate/GED" и выше, имеют значимое отрицательное влияние на уровень гликогемоглобина. Это означает, что более высокий уровень образования связан с более низким уровнем гликогемоглобина.  
+4. Наличие сопутствующих заболеваний (Comorbidities): Наличие сопутствующих заболеваний положительно влияет на уровень гликогемоглобина (p-value < 0.05).  
 
-## Коррекция № 1.
-Распределение переменной предиктора физической активности (Total_MET) ассиметрично. Трансформируем его с помощью логарифмирования.
-
-
-### Скорректированная модель без ковариат
-
-Оценка модели:
-```{r}
-model_no_covariates_with_corection <- lm(Glycohemoglobin ~ log(Total_MET, 0.1), data)
-summary(model_no_covariates_with_corection)
-```
-
-
-### Диагностика после корректирования модели без ковариат
-
-#### Residuals vs Fitted, scale-location plots
-```{r}
-
-autoplot(model_no_covariates_with_corection, which = c(1,3), label.size = 3) +
-  theme_bw()
-
-```
-
-
-
-```{r}
-resid_xpanel(model_no_covariates_with_corection, smoother = TRUE)
-```
-
-#### QQ-plot, гистограмма
-
-
-```{r}
-resid_panel(model_no_covariates_with_corection, plots = c("qq", "hist"))
-```
-
-#### Residuals-Leverage, COOK's D plots
-
-```{r}
-
-resid_panel(model_no_covariates_with_corection, plots = c("lev", "cookd"))
-```
-
-### Табличное представления оценок и доверительные интервалы
-
-```{r}
-tidy(model_no_covariates_with_corection, conf.int = TRUE)
-
-```
-
-*Вывод*: После удаления выбросов и использования натурального логарифма разброс остатков стал более равномерным, а расстояния Кука уменьшились. 
-
-Оценки всех коэффициентов и констант со стандартными ошибками, значения t-критерия и p-value для проверки нулевой гипотезы о равенстве 0 коэффициентов
-```{r}
-coeftest(model_no_covariates_with_corection, vcov = vcovHC, type = "HC1") %>% broom::tidy(conf.int = TRUE)
-```
-
-
-
-### Скорректированная модель с ковариатами
-
-```{r}
-
-model_with_covariates_with_corection <- lm(Glycohemoglobin ~ log(Total_MET, 0.1) +
-                                             Age + Sex + Race + Education +
-                                             Family_income + Comorbidities + Smoking,
-                                           data = data)
-summary(model_with_covariates_with_corection)
-```
-
-### Диагностика модели с ковариатами после коррекции 
-
-#### Residuals vs Fitted, scale-location plots
-```{r}
-autoplot(model_with_covariates, c(1,3))
-```
-
-
-```{r, fig.width=8, fig.height=6}
-resid_xpanel(model_with_covariates, smoother = TRUE)
-```
-
-#### QQ-plot, гистограмма
-
-```{r}
-resid_panel(model_with_covariates, plots = c("qq", "hist"))
-```
-
-#### Residuals-Leverage, COOK's D plots
-
-```{r}
-
-resid_panel(model_with_covariates, plots = c("lev", "cookd"))
-```
-
-#### Оценка мультиколлинеарности
-
-```{r, fig.width=12, fig.height=5}
-vif(model_with_covariates_with_corection)
-check_model(model_with_covariates_with_corection, check ="vif")
-```
-
-Коэффициенты корреляции Пирсона:
-
-```{r}
-cor(data %>% filter(Total_MET > -1000) %>% dplyr::select(Total_MET, Age))
-```
-*Вывод*: После удаления выбросов и использования натурального логарифма разброс остатков не изменился и расстояния Кука значительно не изменились.
-
-Оценки всех коэффициентов и констант со стандартными ошибками, значения t-критерия и p-value для проверки нулевой гипотезы о равенстве 0 коэффициентов
-
-### Табличное представления оценок и доверительные интервалы
-```{r}
-tidy(model_with_covariates_with_corection, conf.int = TRUE)
-
-```
-
+Качество модели:  
+1. R-squared (коэффициент детерминации) составляет 0.1972, что означает, что модель объясняет около 19.72% вариации уровня гликогемоглобина. Это относительно низкий показатель, что может указывать на то, что модель не учитывает все важные факторы, влияющие на уровень гликогемоглобина.  
+Adjusted R-squared (скорректированный коэффициент детерминации) составляет 0.1792, что немного ниже, чем R-squared, что также указывает на возможное наличие лишних переменных в модели.
 
 # Задание 5. 
 Представьте результаты оценки модели без ковариат и с ковариатами в виде точечной и интервальной оценки эффекта физической активности. Дайте им словесную интерпретацию. Какие выводы мы можем сделать, исходя из точечной оценки? А из интервальной? Как вы думаете, можно ли считать эффект клинически значимым? Если затрудняетесь с ответом, что бы вам помогло дать ответ на этот вопрос?
 
 
-**Выводы**
-
 1. Модель без ковариат:
-- Точечная оценка эффекта физической активности равна 0.195, что свидетельствует о небольшом, но положительном эффекте.
-- Интервальная оценка: 95% доверительный интервал (ДИ): 0.073 – 0.317. Интервал не включает ноль, что указывает на статистически значимый эффект (p < 0.01).
-- Интерпретация: Физическая активность в данной модели оказывает значимое влияние на исследуемый результат, и мы можем с высокой уверенностью утверждать, что эффект положительный.
+- Точечная оценка эффекта физической активности равна -0.09354. Это означает, что при увеличении уровня физической активности на одну единицу (Total_MET), уровень гликированного гемоглобина (Glycohemoglobin) снижается в среднем на 0.09354 единицы.  
+- Интервальная оценка: 95% доверительный интервал (ДИ): [-0.1684; -0.0187]. Интервал не включает ноль, что указывает на статистически значимый эффект (p = 0.0145).  
+- Интерпретация.  
+Точечная оценка: Физическая активность оказывает отрицательное влияние на уровень гликированного гемоглобина, то есть снижает его.  
+Интервальная оценка: Поскольку доверительный интервал не включает ноль, эффект физической активности статистически значим на уровне 5%.
 
-2. Модель с ковариатами:
-- Точечная оценка эффекта физической активности снизилась до 0.029.
-- Интервальная оценка: 95% ДИ: -0.0965 – 0.155. Интервал включает ноль, что указывает на отсутствие статистически значимого эффекта (p = 0.64).
-- Интерпретация: После учета ковариат влияние физической активности становится статистически незначимым. Это говорит о том, что эффект физической активности может быть обусловлен взаимодействием с другими переменными.
+2. Модель с ковариатами:  
+- Точечная оценка эффекта физической активности составляет 0.012941. Это означает, что при увеличении уровня физической активности на одну единицу (Total_MET), уровень гликированного гемоглобина (Glycohemoglobin) увеличивается в среднем на 0.012941 единицы.  
+- Интервальная оценка: 95% ДИ: [-0.0594; 0.0853]. Интервал включает ноль, что указывает на отсутствие статистически значимого эффекта (p = 0.73).  
+- Интерпретация.  
+Поскольку доверительный интервал включает ноль, эффект физической активности статистически незначим на уровне 5%.
+
+**Выводы:**
+1. Модель без ковариат:  
+Физическая активность статистически значимо снижает уровень гликированного гемоглобина. Точечная оценка указывает на умеренный отрицательный эффект.  
+2. Модель с ковариатами:  
+После учета ковариат (пол, возраст, раса, образование, сопутствующие заболевания, курение) эффект физической активности становится статистически незначимым.
+
+Клиническая значимость:  
+В модели без ковариат эффект физической активности может считаться клинически значимым, так как снижение уровня гликированного гемоглобина на 0.09354 единицы может быть важным для пациентов с диабетом.  
+
+В модели с ковариатами эффект слишком мал и статистически незначим, поэтому его клиническая значимость сомнительна. Это подчеркивает важность учета confounding факторов при оценке эффектов (чуть подробнее в ответе на задание 8).  
+
 
 # Задание 6. 
-Проверьте гипотезу об отсутствии ассоциации между физической активностью и гликированным гемоглобином. Сделайте выводы по полученным результатам.
+Проверьте гипотезу об отсутствии ассоциации между физической активностью и гликированным гемоглобином. Сделайте выводы по полученным результатам.  
 
-
-Н0: Нет ассоциации между физической активностью и гликированным гемоглобином  
-Н1: Есть ассоциации между физической активностью и гликированным гемоглобином
-
-
-```{r}
-temp <- data %>% select(Glycohemoglobin, Total_MET)
-cor.test(temp$Glycohemoglobin, log(temp$Total_MET, 0.1), method = "spearman")
-```
-*Выводы*: Отвергаем нулевую гипотезу об отсутствии ассоциации между гликированным гемоглобином и логарифмом физической активности.
+*Выводы*: Исходя из результатов задания 5 нет оснований отвергнуть нулевую гипотезу об отсутствии ассоциации между гликированным гемоглобином и уровнем физической активности, выраженной в метаболических коэффициентах.
 
 # Задание 7. 
 Является ли пол модификатором эффекта физической активности в отношении гликированного гемоглобина? Если да, каков эффект для мужчин и женщин и насколько он отличается между ними?
 
 ```{r}
-model_fit <- lm(Glycohemoglobin ~ log(Total_MET, 0.1)*Sex , data)
-summary(model_fit)
+model_Sex <- lm(Glycohemoglobin ~ Total_MET*Sex + Age + Race + Education +
+                              Comorbidities + Smoking, 
+                            data = data_final)
+summary(model_Sex)
+```
+
+
+
+## Диагностика модели
+
+```{r}
+summary(model_Sex)
+
+autoplot(model_Sex, label.size = 3) +
+  theme_bw()
+
+resid_xpanel(model_Sex, smoother = TRUE) +
+  theme_bw()
 ```
 
 
 ```{r}
-emtrends(model_fit, pairwise ~ Sex, var="log(Total_MET, 0.1)")
+tidy(model_Sex, conf.int = TRUE)
 ```
 
-**Вывод:** Пол не является модификатором эффекта физической активности в отношении гликированного гемоглобина.
+
+**Вывод:** Пол не является статистически значимым модификатором эффекта физической активности в отношении гликированного гемоглобина.
 
 
 # Задание 8. 
 Соответствуют ли полученные вами результаты вашему исходному предположению? Как меняется оценка эффекта физической активности при добавлении ковариат в модель и почему?
 
-**Ответ**: При работе с моделью без ковариат, было обнаружено положительное влияние физической активности в отношении гликированного гемоглобина. Однако, при добавлении в модель ковариат, полученные результаты не соответствуют исходному предположению: физическая активность не влияет на уровень гликированного геомглобина. Также добавление ковариат привело к снижению эффекта уровня физической активности на содержание гликированного гемоглобина и изменению p-value.
+**Ответ**: При работе с моделью без ковариат, было обнаружено слабое, но статистически значимое отрицательное влияние физической активности в отношении гликированного гемоглобина. Полученные в данной модели результаты соответствуют исходному предположению: физическая активность влияет на уровень гликированного геомглобина. Стоит отметить, что коэффициент детерминации (R2) очень низкий (0.0087), что говорит о том, что объясненная дисперсия уровня HbA1c за счет одной только физической активности крайне мала.
+
+Однако при добавлении в модель ковариат влияние физической активности на уровень HbA1c оказалось статистически незначимым. При этом наблюдается изменение коэффициента.
+
+Это изменение можно объяснить тем, что переменные, такие как возраст, образование, раса и другие, могут быть конфундерами, которые влияют как на физическую активность, так и на уровень HbA1c. Например, люди старшего возраста имеют более низкую физическую активность и более высокий уровень HbA1c. Образованные люди могут вести более здоровый образ жизни, что может влиять на оба показателя.
+
+
+# Бонусное задание
+
+```{r}
+data_with_BMI <- data_MET %>% 
+  mutate(
+    Age = RIDAGEYR,
+    Sex = as.factor(ifelse(RIAGENDR == 1, "Male", "Female")),
+    Race = as.factor(RIDRETH3) %>%
+      fct_recode(
+        "Mexican_American" = "1",
+        "Other_Hispanic" = "2",
+        "Non-Hispanic_White" = "3",
+        "Non-Hispanic_Black" = "4",
+        "Non-Hispanic_Asian" = "6",
+        "Other_Race" = "7"
+      ),
+    Education = as.factor(DMDEDUC2) %>%
+      fct_recode(
+        "Less_9th-grade" = "1",
+        "9-11th_grade" = "2",
+        "High_school_graduate/GED" = "3",
+        "Some_college" = "4",
+        "College_graduate_or_above" = "5"
+      ),
+    Family_income = as.factor(INDFMIN2) %>%
+      fct_recode(
+        "0-4,999" = "1",
+        "5,000-9,999" = "2",
+        "10,000-14,999" = "3",
+        "15,000-19,999" = "4",
+        "20,000-24,999" = "5",
+        "25,000-34,999" = "6",
+        "35,000-44,999" = "7",
+        "45,000-54,999" = "8",
+        "55,000-64,999" = "9",
+        "65,000-74,999" = "10",
+        "75,000-99,999" = "11",
+        "100,000-Over" = "12"
+      ),
+    Comorbidities = ifelse(
+      rowSums(select(., starts_with("MCQ"), BPQ020, DIQ010) == 1) > 0, 
+      "Yes", "No"
+    ) %>% as.factor(),
+    Smoking = as.factor(SMQ040) %>%
+      fct_recode(
+        "Every_day" = "1",
+        "Some_days" = "2",
+        "Not_at_all" = "3"
+      ),
+    Glycohemoglobin = LBXGH,
+    BMI = as.numeric(BMXBMI)
+  ) %>%
+  select(
+    c(Age, Sex, Race, Education, 
+      Family_income, Comorbidities, Smoking, Total_MET, Glycohemoglobin, BMI)
+    )
+  
+```
+
+
+
+```{r}
+data_filtered_BMI <- data_with_BMI %>%
+  filter(rowSums(across(where(is.numeric), ~ .x %in% boxplot.stats(.x)$out)) == 0)
+
+data_filtered_BMI_numeric <- data_filtered_BMI %>%
+  select(where(is.numeric))
+
+data_filtered__BMI_non_numeric <- data_filtered_BMI %>%
+  select(where(~ !is.numeric(.)))
+
+data_cleaned_BMI <- bind_cols(data_filtered_BMI_numeric, data_filtered__BMI_non_numeric)
+
+data_cleaned_BMI <- data_cleaned_BMI %>% 
+  filter(Age != 80)
+
+```
+
+
+
+```{r}
+bonus_model <- lm(Glycohemoglobin ~ Total_MET + Sex + Age + Race + Education +
+                              Comorbidities + Smoking + BMI, 
+                            data = data_cleaned_BMI)
+```
 
 
 
 
+## Оценка модели с BMI
+### Summary, Residuals vs Fitted, QQ, scale-location plots
+
+```{r}
+summary(bonus_model)
+
+autoplot(bonus_model, label.size = 3) +
+  theme_bw()
+
+resid_xpanel(bonus_model, smoother = TRUE) +
+  theme_bw()
+```
+
+### Residuals-Leverage, COOK's D plots
+
+```{r}
+
+resid_panel(bonus_model, plots = c("lev", "cookd"))
+```
+
+### Оценка мультиколлинеарности.
+
+```{r, fig.width=12, fig.height=5}
+
+vif(bonus_model)
+check_model(bonus_model, check ="vif")
+
+```
 
 
 
+### Табличное представления оценок и доверительные интервалы
+
+```{r}
+tidy(bonus_model, conf.int = TRUE)
+
+```
 
 
-
-
-
-
-
+**Вывод:**
+Коэффициент при Total_MET уменьшился с 0.013 [-0.0594; 0.0853] до 3.4×10^−6 [-9.12×10^−6; 1.6×10^−5], при этом все также статистически незначим. Такое снижение связано с тем, что ИМТ как медиатор физической активности по отношению к Hb1Ac снизил общий эффект физической активности.
